@@ -98,34 +98,34 @@ def process_image(image_path, model, seed_regions, confidence_threshold=0.5):
 def draw_predictions(
     image, predictions, class_names=["background", "germinated", "ungerminated"]
 ):
-    """Draw predictions on the image"""
+    """draw predictions on the image"""
     result = image.copy()
-    colors = [(0, 255, 0), (0, 0, 255)]  # Green for germinated, Red for ungerminated
+    colors = [(0, 255, 0), (0, 0, 255)]  # green for germinated, red for ungerminated
 
     for pred in predictions:
         x, y, w, h = pred["bbox"]
 
-        # Draw region rectangle
+        # draw region rectangle
         cv2.rectangle(result, (x, y), (x + w, y + h), (255, 255, 255), 2)
 
-        # Draw classification and ROI number inside box
-        label_idx = pred["labels"][0] - 1  # Subtract 1 to skip background class
+        # draw classification and roi number inside box
+        label_idx = pred["labels"][0] - 1  # subtract 1 to skip background class
         label_text = f"{pred['roi']}: {class_names[label_idx+1]}"
 
-        # Use smaller font size (0.4 instead of 0.5)
+        # use smaller font size
         font_scale = 0.4
         thickness = 1
 
-        # Get text size to position properly
+        # get text size to position properly
         (text_width, text_height), _ = cv2.getTextSize(
             label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
         )
 
-        # Position text inside box with small padding (5 pixels)
+        # position text inside box with small padding
         text_x = x + 5
         text_y = y + text_height + 5
 
-        # Draw text with small outline for better visibility
+        # draw text with small outline for better visibility
         cv2.putText(
             result,
             label_text,
