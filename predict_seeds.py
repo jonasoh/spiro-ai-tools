@@ -8,27 +8,20 @@ from torchvision.transforms import ToTensor
 
 
 def load_model(weights_path, num_classes=3):
-    """Load the trained Mask R-CNN model"""
+    """loads and configures the mask r-cnn model"""
     model = torchvision.models.detection.maskrcnn_resnet50_fpn(weights=None)
-
-    # Modify the model architecture to match training
-    in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = (
         torchvision.models.detection.faster_rcnn.FastRCNNPredictor(
-            in_features, num_classes
+            model.roi_heads.box_predictor.cls_score.in_features, num_classes
         )
     )
-    mask_in_features = model.roi_heads.mask_predictor.conv5_mask.in_channels
     model.roi_heads.mask_predictor = (
         torchvision.models.detection.mask_rcnn.MaskRCNNPredictor(
-            mask_in_features, 256, num_classes
+            model.roi_heads.mask_predictor.conv5_mask.in_channels, 256, num_classes
         )
     )
-
-    # Load trained weights
     model.load_state_dict(torch.load(weights_path, weights_only=True))
-    model.eval()
-    return model
+    return model.eval()
 
 
 def get_seed_regions(

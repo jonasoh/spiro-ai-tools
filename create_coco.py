@@ -5,7 +5,6 @@ import argparse
 
 
 def create_coco_json(data_dir, output_json):
-    # initialize COCO format structure
     coco_format = {
         "images": [],
         "annotations": [],
@@ -14,20 +13,17 @@ def create_coco_json(data_dir, output_json):
             {"id": 2, "name": "ungerminated", "supercategory": "seed"},
         ],
     }
+    annotation_id = image_id = 1
 
-    annotation_id = 1
-    image_id = 1
-
-    # traverse the directory structure
     for experiment in os.listdir(data_dir):
-        experiment_path = os.path.join(data_dir, experiment)
-        if not os.path.isdir(experiment_path):
-            continue  # skip non-directories
+        if not os.path.isdir(experiment_path := os.path.join(data_dir, experiment)):
+            continue
 
         for category in ["germinated", "ungerminated"]:
-            category_path = os.path.join(experiment_path, category)
-            if not os.path.isdir(category_path):
-                continue  # skip if category folder is missing
+            if not os.path.isdir(
+                category_path := os.path.join(experiment_path, category)
+            ):
+                continue
 
             category_id = 1 if category == "germinated" else 2
 

@@ -1,13 +1,12 @@
-# define dataset
-import torch
 import os
+import torch
 import argparse
+import torchvision
 from PIL import Image
 from pycocotools.coco import COCO
-import torchvision
 from torchvision.transforms import ToTensor
-import numpy as np
 from tqdm import tqdm
+import numpy as np
 
 
 class SeedDataset(torch.utils.data.Dataset):
@@ -53,7 +52,6 @@ def collate_fn(batch):
 
 
 if __name__ == "__main__":
-    # Add command line arguments
     parser = argparse.ArgumentParser(
         description="Train Mask R-CNN model for seed detection"
     )
@@ -90,10 +88,8 @@ if __name__ == "__main__":
     device = torch.device("cpu")
     print(f"Using device: {device}")
 
-    # load dataset with improved data loading
-    dataset = SeedDataset("roboflow_batch1/", "roboflow_batch1/train_coco.json")
     data_loader = torch.utils.data.DataLoader(
-        dataset,
+        SeedDataset("roboflow_batch1/", "roboflow_batch1/train_coco.json"),
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
@@ -102,30 +98,25 @@ if __name__ == "__main__":
         collate_fn=collate_fn,
     )
 
-    # load mask r-cnn
     model = torchvision.models.detection.maskrcnn_resnet50_fpn(weights="DEFAULT")
-    num_classes = 3  # background + 2 seed classes
-    in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = (
         torchvision.models.detection.faster_rcnn.FastRCNNPredictor(
-            in_features, num_classes
+            model.roi_heads.box_predictor.cls_score.in_features,
+            3,  # background + 2 seed classes
         )
     )
-    mask_in_features = model.roi_heads.mask_predictor.conv5_mask.in_channels
     model.roi_heads.mask_predictor = (
         torchvision.models.detection.mask_rcnn.MaskRCNNPredictor(
-            mask_in_features, 256, num_classes
+            model.roi_heads.mask_predictor.conv5_mask.in_channels, 256, 3
         )
     )
-
     model.to(device)
 
-    # Improved training setup with args
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
 
-    # Add learning rate scheduler
+    # learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="min",
@@ -134,7 +125,7 @@ if __name__ == "__main__":
         verbose=True,
     )
 
-    # Track best loss for model saving
+    # track best loss for model saving
     best_loss = float("inf")
     checkpoint_path = os.path.join(args.checkpoint_dir, "best_model.pth")
 
@@ -145,14 +136,14 @@ if __name__ == "__main__":
         for images, targets in tqdm(data_loader):
             optimizer.zero_grad()
 
-            # Simple forward pass without autocast
+            # simple forward pass without autocast
             losses = model(images, targets)
             loss = sum(losses.values())
 
-            # Regular backward pass
+            # regular backward pass
             loss.backward()
 
-            # Clip gradients for stability
+            # clip gradients for stability
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
             optimizer.step()
@@ -161,10 +152,10 @@ if __name__ == "__main__":
         avg_loss = total_loss / len(data_loader)
         print(f"epoch {epoch}: avg loss: {avg_loss:.4f}")
 
-        # Update learning rate based on loss
+        # update learning rate based on loss
         scheduler.step(avg_loss)
 
-        # Save best model with args.checkpoint_dir
+        # save best model with args.checkpoint_dir
         if avg_loss < best_loss:
             best_loss = avg_loss
             torch.save(
@@ -177,6 +168,6 @@ if __name__ == "__main__":
                 checkpoint_path,
             )
 
-    # Save final model with specified output path
+    # save final model with specified output path
     torch.save(model.state_dict(), args.output)
     print(f"Training completed. Model saved to {args.output}")

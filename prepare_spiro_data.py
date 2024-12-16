@@ -48,48 +48,28 @@ os.makedirs(outdir, exist_ok=True)
 
 
 def find_crop_position(orig, cropped_image):
-    """finds the x,y top-left corner of the crop in the original picture
-
-    orig: filename of the original image (str)
-    crop: the cropped image as a numpy array"""
-
-    # load original image
-    original_image = cv2.imread(orig, cv2.IMREAD_GRAYSCALE)  # original image
-
-    # template matching
-    result = cv2.matchTemplate(original_image, cropped_image, cv2.TM_CCOEFF_NORMED)
-
-    # find the location with the highest correlation
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-
-    return max_loc
+    """finds the x,y top-left corner of the crop in the original picture"""
+    return cv2.minMaxLoc(
+        cv2.matchTemplate(
+            cv2.imread(orig, cv2.IMREAD_GRAYSCALE), cropped_image, cv2.TM_CCOEFF_NORMED
+        )
+    )[3]
 
 
 def keep_largest_object(binary_image):
-    """
-    Takes a binary image and keeps only the largest connected object.
-
-    Parameters:
-        binary_image (numpy.ndarray): Binary image (grayscale) where objects are white (255) and background is black (0).
-
-    Returns:
-        numpy.ndarray: Binary image with only the largest object kept.
-    """
-    # find contours
+    """keeps only the largest connected object in a binary image"""
+    cleaned_image = np.zeros_like(binary_image)
     contours, _ = cv2.findContours(
         binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
-
-    # create an empty mask
-    cleaned_image = np.zeros_like(binary_image)
-
-    # find and draw the largest contour
     if contours:
-        largest_contour = max(contours, key=cv2.contourArea)
         cv2.drawContours(
-            cleaned_image, [largest_contour], -1, 255, thickness=cv2.FILLED
+            cleaned_image,
+            [max(contours, key=cv2.contourArea)],
+            -1,
+            255,
+            thickness=cv2.FILLED,
         )
-
     return cleaned_image
 
 
@@ -232,12 +212,7 @@ def format_slice_number(slice_num, total_slices):
 
 
 if __name__ == "__main__":
-    pattern = os.path.join(indir, "Results/Root Growth/plate[1-4]/*")
-
-    # get matching directories
-    matched_dirs = glob.glob(pattern)
-
-    # create the dictionary list
+    # create directory list directly
     dirs = [
         {
             "code": f"{os.path.basename(os.path.dirname(d))}_{os.path.basename(d)}",
@@ -245,7 +220,7 @@ if __name__ == "__main__":
             "plate": os.path.basename(os.path.dirname(d)),
             "dir": d,
         }
-        for d in matched_dirs
+        for d in glob.glob(os.path.join(indir, "Results/Root Growth/plate[1-4]/*"))
     ]
 
     for d in dirs:
