@@ -83,15 +83,64 @@ if __name__ == "__main__":
         default=2,
         help="patience for learning rate scheduler",
     )
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        required=True,
+        help="directory containing the image data",
+    )
+    parser.add_argument(
+        "--train-annotations",
+        type=str,
+        required=True,
+        help="path to train COCO annotations file",
+    )
+    parser.add_argument(
+        "--val-annotations",
+        type=str,
+        required=True,
+        help="path to validation COCO annotations file",
+    )
     args = parser.parse_args()
 
     device = torch.device("cpu")
     print(f"Using device: {device}")
 
-    data_loader = torch.utils.data.DataLoader(
-        SeedDataset("roboflow_batch1/", "roboflow_batch1/train_coco.json"),
+    # Load datasets with validation
+    print("Loading training dataset...")
+    train_dataset = SeedDataset(args.data_dir, args.train_annotations)
+    if len(train_dataset) == 0:
+        raise ValueError(
+            f"Training dataset is empty! Please check the paths:\n"
+            f"Data directory: {args.data_dir}\n"
+            f"Train annotations: {args.train_annotations}"
+        )
+    print(f"Training dataset size: {len(train_dataset)}")
+
+    print("Loading validation dataset...")
+    val_dataset = SeedDataset(args.data_dir, args.val_annotations)
+    if len(val_dataset) == 0:
+        raise ValueError(
+            f"Validation dataset is empty! Please check the paths:\n"
+            f"Data directory: {args.data_dir}\n"
+            f"Validation annotations: {args.val_annotations}"
+        )
+    print(f"Validation dataset size: {len(val_dataset)}")
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=False,
+        prefetch_factor=2,
+        collate_fn=collate_fn,
+    )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
         num_workers=args.num_workers,
         pin_memory=False,
         prefetch_factor=2,
@@ -128,36 +177,44 @@ if __name__ == "__main__":
     # track best loss for model saving
     best_loss = float("inf")
     checkpoint_path = os.path.join(args.checkpoint_dir, "best_model.pth")
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
 
     for epoch in range(args.epochs):
+        # Training phase
         total_loss = 0.0
         model.train()
-
-        for images, targets in tqdm(data_loader):
+        for images, targets in tqdm(
+            train_loader, desc=f"Epoch {epoch+1}/{args.epochs} - Training"
+        ):
             optimizer.zero_grad()
-
-            # simple forward pass without autocast
             losses = model(images, targets)
             loss = sum(losses.values())
-
-            # regular backward pass
             loss.backward()
-
-            # clip gradients for stability
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
             optimizer.step()
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(data_loader)
-        print(f"epoch {epoch}: avg loss: {avg_loss:.4f}")
+        avg_train_loss = total_loss / len(train_loader)
 
-        # update learning rate based on loss
-        scheduler.step(avg_loss)
+        # Validation phase
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for images, targets in tqdm(val_loader, desc="Validation"):
+                losses = model(images, targets)
+                val_loss += sum(losses.values()).item()
 
-        # save best model with args.checkpoint_dir
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        avg_val_loss = val_loss / len(val_loader)
+        print(
+            f"Epoch {epoch}: Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}"
+        )
+
+        # Update learning rate based on validation loss
+        scheduler.step(avg_val_loss)
+
+        # Save best model based on validation loss
+        if avg_val_loss < best_loss:
+            best_loss = avg_val_loss
             torch.save(
                 {
                     "epoch": epoch,
