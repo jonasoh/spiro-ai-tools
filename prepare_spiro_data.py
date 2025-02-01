@@ -38,6 +38,12 @@ parser.add_argument(
     action="store_true",
     help="Whether to crop out individual seeds (default: True).",
 )
+# New option to skip mask processing
+parser.add_argument(
+    "--nomask",
+    action="store_true",
+    help="If set, only process images and skip mask processing.",
+)
 
 # parse arguments
 args = parser.parse_args()
@@ -268,30 +274,43 @@ if __name__ == "__main__":
                             TOPLEFT[1] + y_start : TOPLEFT[1] + y_end,
                             TOPLEFT[0] + x_start : TOPLEFT[0] + x_end,
                         ]
-                        cropped_mask = masks[slice_number - 1][
-                            y_start:y_end, x_start:x_end
-                        ]
-                        cropped_mask = get_connected_object(cropped_mask, 64, 87)
+                        # Process mask only if --nomask is not set
+                        if not args.nomask:
+                            cropped_mask = masks[slice_number - 1][
+                                y_start:y_end, x_start:x_end
+                            ]
+                            cropped_mask = get_connected_object(cropped_mask, 64, 87)
 
-                        # prepare paths and images
-                        output_path = os.path.join(
-                            outdir,
-                            f"roi_{roi}_{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
-                        )
-                        mask_path = output_path.replace("_crop.webp", "_mask.webp")
+                            # prepare paths and add mask to save list
+                            output_path = os.path.join(
+                                outdir,
+                                f"roi_{roi}_{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                            )
+                            mask_path = output_path.replace("_crop.webp", "_mask.webp")
 
-                        # convert and collect images
-                        cropped_image = Image.fromarray(
-                            cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
-                        )
-                        cropped_mask = Image.fromarray(cropped_mask)
-
-                        images_to_save.extend([cropped_image, cropped_mask])
-                        paths_to_save.extend([output_path, mask_path])
+                            images_to_save.extend(
+                                [
+                                    Image.fromarray(
+                                        cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
+                                    ),
+                                    Image.fromarray(cropped_mask),
+                                ]
+                            )
+                            paths_to_save.extend([output_path, mask_path])
+                        else:
+                            output_path = os.path.join(
+                                outdir,
+                                f"roi_{roi}_{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                            )
+                            images_to_save.append(
+                                Image.fromarray(
+                                    cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
+                                )
+                            )
+                            paths_to_save.append(output_path)
 
                         pbar.update(1)
 
-                # Batch save all images
                 save_params = {"format": "WebP", "lossless": True}
                 parallel_save_images(images_to_save, paths_to_save, save_params)
         else:
@@ -307,31 +326,41 @@ if __name__ == "__main__":
                         TOPLEFT[0] : TOPLEFT[0] + firstslice[0].shape[1],
                     ]
 
-                    mask = get_objects_from_coordinates(
-                        masks[slice_number - 1],
-                        zip(
-                            df.loc[df["Slice"] == slice_number, "xUP"].astype(int),
-                            df.loc[df["Slice"] == slice_number, "yUP"].astype(int),
-                        ),
-                    )
-
-                    output_path = os.path.join(
-                        outdir,
-                        f"{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
-                    )
-                    mask_path = output_path.replace("_crop.webp", "_mask.webp")
-
-                    # Convert and collect images
-                    cropped_image = Image.fromarray(
-                        cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
-                    )
-                    mask = Image.fromarray(mask)
-
-                    images_to_save.extend([cropped_image, mask])
-                    paths_to_save.extend([output_path, mask_path])
+                    if not args.nomask:
+                        mask = get_objects_from_coordinates(
+                            masks[slice_number - 1],
+                            zip(
+                                df.loc[df["Slice"] == slice_number, "xUP"].astype(int),
+                                df.loc[df["Slice"] == slice_number, "yUP"].astype(int),
+                            ),
+                        )
+                        output_path = os.path.join(
+                            outdir,
+                            f"{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                        )
+                        mask_path = output_path.replace("_crop.webp", "_mask.webp")
+                        images_to_save.extend(
+                            [
+                                Image.fromarray(
+                                    cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
+                                ),
+                                Image.fromarray(mask),
+                            ]
+                        )
+                        paths_to_save.extend([output_path, mask_path])
+                    else:
+                        output_path = os.path.join(
+                            outdir,
+                            f"{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                        )
+                        images_to_save.append(
+                            Image.fromarray(
+                                cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
+                            )
+                        )
+                        paths_to_save.append(output_path)
 
                     pbar.update(1)
 
-                # Batch save all images
                 save_params = {"format": "WebP", "lossless": True}
                 parallel_save_images(images_to_save, paths_to_save, save_params)
