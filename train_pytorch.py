@@ -201,6 +201,8 @@ if __name__ == "__main__":
         val_loss = 0.0
         with torch.no_grad():
             for images, targets in tqdm(val_loader, desc="Validation"):
+                images = [image.to(device) for image in images]
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
                 losses = model(images, targets)
                 val_loss += sum(losses.values()).item()
 
