@@ -217,6 +217,119 @@ def format_slice_number(slice_num, total_slices):
     return str(slice_num).zfill(width)
 
 
+def process_cropped_image(image, x_center, y_center, w, h, TOPLEFT):
+    """Extract a cropped region from the image."""
+    x_start = max(0, int(x_center - w / 2))
+    y_start = max(0, int(y_center - h / 2))
+    x_end = min(image.shape[1], x_start + w)
+    y_end = min(image.shape[0], y_start + h)
+
+    return image[
+        TOPLEFT[1] + y_start : TOPLEFT[1] + y_end,
+        TOPLEFT[0] + x_start : TOPLEFT[0] + x_end,
+    ], (x_start, y_start, x_end, y_end)
+
+
+def process_uncropped_image(image, TOPLEFT, firstslice):
+    """Process the full image without cropping."""
+    return image[
+        TOPLEFT[1] : TOPLEFT[1] + firstslice[0].shape[0],
+        TOPLEFT[0] : TOPLEFT[0] + firstslice[0].shape[1],
+    ]
+
+
+def prepare_save_data(image, mask=None):
+    """Prepare image and optional mask for saving."""
+    saves = [Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))]
+    if mask is not None:
+        saves.append(Image.fromarray(mask))
+    return saves
+
+
+def process_images(d, df, orig_files, masks, firstslice, TOPLEFT, args, w, h):
+    """Main image processing function."""
+    max_slice = df["Slice"].max()
+    images_to_save = []
+    paths_to_save = []
+
+    if args.nocrop:
+        # Process full images
+        with tqdm(total=df["Slice"].nunique(), desc="Processing images") as pbar:
+            for slice_number, group in df.groupby("Slice"):
+                image = cv2.imread(
+                    os.path.join(indir, d["plate"], orig_files[slice_number - 1])
+                )
+                cropped_image = process_uncropped_image(image, TOPLEFT, firstslice)
+
+                if not args.nomask:
+                    mask = get_objects_from_coordinates(
+                        masks[slice_number - 1],
+                        zip(
+                            df.loc[df["Slice"] == slice_number, "xUP"].astype(int),
+                            df.loc[df["Slice"] == slice_number, "yUP"].astype(int),
+                        ),
+                    )
+                    base_path = os.path.join(
+                        outdir,
+                        f"{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                    )
+                    images_to_save.extend(prepare_save_data(cropped_image, mask))
+                    paths_to_save.extend(
+                        [base_path, base_path.replace("_crop.webp", "_mask.webp")]
+                    )
+                else:
+                    base_path = os.path.join(
+                        outdir,
+                        f"{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                    )
+                    images_to_save.extend(prepare_save_data(cropped_image))
+                    paths_to_save.append(base_path)
+                pbar.update(1)
+    else:
+        # Process individual ROIs
+        with tqdm(total=len(df), desc="Processing ROIs") as pbar:
+            for slice_number, group in df.groupby("Slice"):
+                image = cv2.imread(
+                    os.path.join(indir, d["plate"], orig_files[slice_number - 1])
+                )
+
+                for _, row in group.iterrows():
+                    roi = int(row["ROI"])
+                    x_center = row["xUP"]
+                    y_center = row["yUP"] + int(h / 6)
+
+                    cropped_image, (x_start, y_start, x_end, y_end) = (
+                        process_cropped_image(image, x_center, y_center, w, h, TOPLEFT)
+                    )
+
+                    if not args.nomask:
+                        cropped_mask = masks[slice_number - 1][
+                            y_start:y_end, x_start:x_end
+                        ]
+                        cropped_mask = get_connected_object(cropped_mask, 64, 87)
+                        base_path = os.path.join(
+                            outdir,
+                            f"roi_{roi}_{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                        )
+                        images_to_save.extend(
+                            prepare_save_data(cropped_image, cropped_mask)
+                        )
+                        paths_to_save.extend(
+                            [base_path, base_path.replace("_crop.webp", "_mask.webp")]
+                        )
+                    else:
+                        base_path = os.path.join(
+                            outdir,
+                            f"roi_{roi}_{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
+                        )
+                        images_to_save.extend(prepare_save_data(cropped_image))
+                        paths_to_save.append(base_path)
+
+                    pbar.update(1)
+
+    return images_to_save, paths_to_save
+
+
 if __name__ == "__main__":
     # create directory list directly
     dirs = [
@@ -243,124 +356,9 @@ if __name__ == "__main__":
             os.path.join(d["dir"], d["group"] + " rootstartcoordinates.tsv"), sep="\t"
         )
 
-        # Get max slice number for zero padding
-        max_slice = df["Slice"].max()
+        images_to_save, paths_to_save = process_images(
+            d, df, orig_files, masks, firstslice, TOPLEFT, args, w, h
+        )
 
-        if not args.nocrop:
-            with tqdm(total=len(df), desc="Processing ROIs") as pbar:
-                images_to_save = []
-                paths_to_save = []
-                for slice_number, group in df.groupby("Slice"):
-                    image_path = orig_files[slice_number - 1]
-                    image = cv2.imread(os.path.join(indir, d["plate"], image_path))
-
-                    for index, row in group.iterrows():
-                        roi = int(row["ROI"])
-                        x_center = row["xUP"]
-                        y_center = row["yUP"] + int(h / 6)
-
-                        # calculate crop box boundaries
-                        x_start = max(0, int(x_center - w / 2))
-                        y_start = max(0, int(y_center - h / 2))
-                        x_end = min(image.shape[1], x_start + w)
-                        y_end = min(image.shape[0], y_start + h)
-
-                        if image is None:
-                            print(f"Error: Could not open image {image_path}")
-                            continue
-
-                        # crop the image
-                        cropped_image = image[
-                            TOPLEFT[1] + y_start : TOPLEFT[1] + y_end,
-                            TOPLEFT[0] + x_start : TOPLEFT[0] + x_end,
-                        ]
-                        # Process mask only if --nomask is not set
-                        if not args.nomask:
-                            cropped_mask = masks[slice_number - 1][
-                                y_start:y_end, x_start:x_end
-                            ]
-                            cropped_mask = get_connected_object(cropped_mask, 64, 87)
-
-                            # prepare paths and add mask to save list
-                            output_path = os.path.join(
-                                outdir,
-                                f"roi_{roi}_{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
-                            )
-                            mask_path = output_path.replace("_crop.webp", "_mask.webp")
-
-                            images_to_save.extend(
-                                [
-                                    Image.fromarray(
-                                        cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
-                                    ),
-                                    Image.fromarray(cropped_mask),
-                                ]
-                            )
-                            paths_to_save.extend([output_path, mask_path])
-                        else:
-                            output_path = os.path.join(
-                                outdir,
-                                f"roi_{roi}_{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
-                            )
-                            images_to_save.append(
-                                Image.fromarray(
-                                    cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
-                                )
-                            )
-                            paths_to_save.append(output_path)
-
-                        pbar.update(1)
-
-                save_params = {"format": "WebP", "lossless": True}
-                parallel_save_images(images_to_save, paths_to_save, save_params)
-        else:
-            with tqdm(total=df["Slice"].nunique(), desc="Processing images") as pbar:
-                images_to_save = []
-                paths_to_save = []
-                for slice_number, group in df.groupby("Slice"):
-                    image_path = orig_files[slice_number - 1]
-                    image = cv2.imread(os.path.join(indir, d["plate"], image_path))
-
-                    cropped_image = image[
-                        TOPLEFT[1] : TOPLEFT[1] + firstslice[0].shape[0],
-                        TOPLEFT[0] : TOPLEFT[0] + firstslice[0].shape[1],
-                    ]
-
-                    if not args.nomask:
-                        mask = get_objects_from_coordinates(
-                            masks[slice_number - 1],
-                            zip(
-                                df.loc[df["Slice"] == slice_number, "xUP"].astype(int),
-                                df.loc[df["Slice"] == slice_number, "yUP"].astype(int),
-                            ),
-                        )
-                        output_path = os.path.join(
-                            outdir,
-                            f"{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
-                        )
-                        mask_path = output_path.replace("_crop.webp", "_mask.webp")
-                        images_to_save.extend(
-                            [
-                                Image.fromarray(
-                                    cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
-                                ),
-                                Image.fromarray(mask),
-                            ]
-                        )
-                        paths_to_save.extend([output_path, mask_path])
-                    else:
-                        output_path = os.path.join(
-                            outdir,
-                            f"{d['code']}_{format_slice_number(slice_number, max_slice)}_crop.webp",
-                        )
-                        images_to_save.append(
-                            Image.fromarray(
-                                cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
-                            )
-                        )
-                        paths_to_save.append(output_path)
-
-                    pbar.update(1)
-
-                save_params = {"format": "WebP", "lossless": True}
-                parallel_save_images(images_to_save, paths_to_save, save_params)
+        save_params = {"format": "WebP", "lossless": True}
+        parallel_save_images(images_to_save, paths_to_save, save_params)
