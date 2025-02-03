@@ -1,12 +1,11 @@
-import argparse
 import csv
-import os
 import shutil
-from pathlib import Path
 import random
-from collections import defaultdict
+import argparse
 import hashlib
+from pathlib import Path
 from itertools import count
+from collections import defaultdict
 
 
 def parse_args():
@@ -91,7 +90,6 @@ def process_images(image_dir, germination_data, undecided_frames, out_dir, max_s
         if uid not in seed_ids:
             seed_ids[uid] = next(next_id)
 
-        # ...rest of grouping logic...
         frame_num = int(parts[4])
         germ_frame = germination_data[uid]
 
@@ -121,7 +119,7 @@ def process_images(image_dir, germination_data, undecided_frames, out_dir, max_s
                     new_name = f"{dir_hash}{seed_num}_{frame_num}{img_file.suffix}"
                     shutil.copy(str(img_file), str(dest_dir / new_name))
 
-        # Process undecided
+        # Process undecided (frames around germination)
         for img_file in categories["undecided"]:
             parts = img_file.stem.split("_")
             frame_num = parts[4]  # Frame number is always at index 4
